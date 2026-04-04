@@ -1,0 +1,22 @@
+[
+  {
+    "content": "Phase 1: Ottenere playbook integrazioni per meteo, prezzi energia, Google OAuth, email e upload PDF",
+    "status": "in_progress"
+  },
+  {
+    "content": "Phase 1: Raccogliere credenziali richieste dall'utente per le integrazioni reali",
+    "status": "pending"
+  },
+  {
+    "content": "Phase 1: Implementare POC core flow isolato (ingest manuale + upload PDF-ready + weather/prices + anomaly + advice + ROI + prediction)",
+    "status": "pending"
+  },
+  {
+    "content": "Phase 1: Testare il POC end-to-end e correggere fino a successo",
+    "status": "pending"
+  },
+  {
+    "content": "Phase 1: Aggiornare plan.md con stato POC completato e prossimi passi",
+    "status": "pending"
+  }
+]
