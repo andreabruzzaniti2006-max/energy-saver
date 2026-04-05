@@ -1,22 +1,14 @@
 [
   {
-    "content": "Phase 2: Preparare design system e architettura V1 working app",
-    "status": "completed"
+    "content": "Bugfix: riprodurre il caso upload PDF -> analisi bloccata",
+    "status": "in_progress"
   },
   {
-    "content": "Phase 2: Implementare backend SaaS V1 completo",
-    "status": "completed"
+    "content": "Bugfix: correggere backend/UX per bollette caricate ma non ancora strutturate",
+    "status": "pending"
   },
   {
-    "content": "Phase 2: Implementare frontend V1 completo",
-    "status": "completed"
-  },
-  {
-    "content": "Phase 2: Coprire tutte le user stories in sviluppo e testing",
-    "status": "completed"
-  },
-  {
-    "content": "Phase 2: End to End Testing using Testing Agent",
-    "status": "completed"
+    "content": "Bugfix: testare end-to-end con testing agent dopo la correzione",
+    "status": "pending"
   }
 ]

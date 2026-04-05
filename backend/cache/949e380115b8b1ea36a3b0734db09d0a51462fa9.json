@@ -3,9 +3,9 @@
   "source": "openweather",
   "cached": false,
   "city": "Milano",
-  "temperature_c": 14,
-  "humidity_pct": 63,
-  "wind_speed_ms": 2.07,
-  "weather": "nubi sparse",
-  "retrieved_at": "2026-04-05T00:19:06.458917+00:00"
+  "temperature_c": 13.03,
+  "humidity_pct": 66,
+  "wind_speed_ms": 1.93,
+  "weather": "poche nuvole",
+  "retrieved_at": "2026-04-05T00:58:34.003805+00:00"
 }

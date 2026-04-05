@@ -57,6 +57,11 @@ export default function DashboardPage() {
           <Badge className="rounded-full bg-secondary text-secondary-foreground">Valore economico in primo piano</Badge>
           <h2 className="mt-4 font-['Space_Grotesk'] text-4xl font-semibold tracking-[-0.04em] text-foreground">Visualizza costi, sprechi e azioni con impatto immediato.</h2>
           <p className="mt-4 max-w-2xl text-base leading-7 text-muted-foreground">Ogni analisi combina storico consumi, meteo e prezzo energia per far emergere dove intervenire e quanto puoi recuperare in margine.</p>
+          {overview?.counts?.pending_bill_reviews ? (
+            <div className="mt-5 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm leading-6 text-amber-800">
+              Hai {overview.counts.pending_bill_reviews} bolletta/e da rivedere. Apri Bollette e completa consumo, costo e periodo per includerle nell’analisi.
+            </div>
+          ) : null}
           <div className="mt-6 flex flex-wrap gap-3">
             <Button data-testid="dashboard-run-analysis-button" className="min-h-11" onClick={runAnalysis} disabled={running}>
               <RefreshCcw className="h-4 w-4" />

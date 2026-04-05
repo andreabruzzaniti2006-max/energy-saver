@@ -964,7 +964,20 @@ async def delete_consumption_entry(entry_id: str, ctx: AuthContext = Depends(get
 async def run_analysis(ctx: AuthContext = Depends(get_auth_context)):
     readings = await gather_site_readings(ctx.site["id"])
     if not readings:
-        raise HTTPException(status_code=400, detail="Aggiungi almeno una bolletta o un consumo manuale prima di lanciare l’analisi")
+        pending_bill_reviews = await db.bills.count_documents({
+            "org_id": ctx.org["id"],
+            "site_id": ctx.site["id"],
+            "extraction_status": {"$ne": "parsed"},
+        })
+        if pending_bill_reviews:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Hai già caricato {pending_bill_reviews} bolletta/e, ma sono in stato 'Da rivedere'. "
+                    "Apri Bollette > Rivedi e compila almeno consumo, costo e periodo per sbloccare l’analisi."
+                ),
+            )
+        raise HTTPException(status_code=400, detail="Aggiungi almeno una bolletta strutturata o un consumo manuale prima di lanciare l’analisi")
     weather_context = fetch_weather_context(float(ctx.site.get("latitude") or DEFAULT_LATITUDE), float(ctx.site.get("longitude") or DEFAULT_LONGITUDE))
     price_signal = fetch_energy_prices(limit=96)
     analysis = analyze_dataset(
@@ -1094,6 +1107,7 @@ async def dashboard_overview(ctx: AuthContext = Depends(get_auth_context)):
             "readings": readings_count,
             "reports": reports_count,
             "unread_notifications": unread_notifications,
+            "pending_bill_reviews": sum(1 for item in bills if item.get("extraction_status") != "parsed"),
         },
         "latest_analysis": serialize_doc(latest),
         "recent_bills": [serialize_doc(item) for item in bills],

@@ -73,21 +73,28 @@ export default function OnboardingPage() {
       });
 
       const parsedEntries = parseManualEntries(manualText);
+      let uploadedBill = null;
       if (selectedFile) {
         const formData = new FormData();
         formData.append("file", selectedFile);
-        await api.post("/bills/upload", formData, {
+        const uploadResponse = await api.post("/bills/upload", formData, {
           headers: { "Content-Type": "multipart/form-data" },
         });
+        uploadedBill = uploadResponse.data.bill;
       }
       if (parsedEntries.length) {
         await api.post("/consumption/batch", { entries: parsedEntries });
       }
-      if (selectedFile || parsedEntries.length) {
+      if (parsedEntries.length || uploadedBill?.extraction_status === "parsed") {
         await api.post("/analytics/run");
       }
 
       await refreshSession();
+      if (uploadedBill?.extraction_status && uploadedBill.extraction_status !== "parsed" && !parsedEntries.length) {
+        toast.message("Bolletta caricata ma da rivedere: completa i campi su Bollette prima di lanciare l’analisi.");
+        navigate("/bills");
+        return;
+      }
       toast.success("Onboarding completato");
       navigate("/dashboard");
     } catch (error) {

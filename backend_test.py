@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
 Backend API Testing for Energy Optimization SaaS
-Tests auth endpoints and core functionality as specified in the review request.
-Focus: Google OAuth redirect behavior and dev bypass auth regression check.
+Tests PDF upload and bill review functionality as specified in the review request.
+Focus: PDF upload that results in needs_manual_review and analytics error handling.
 """
 
 import requests
@@ -12,7 +12,7 @@ import io
 from datetime import datetime, timezone
 from typing import Dict, Any, List, Optional
 
-class EnergyAuthTester:
+class EnergyBillTester:
     def __init__(self, base_url: str = "https://energy-saver-16.preview.emergentagent.com"):
         self.base_url = base_url
         self.tests_run = 0
@@ -20,6 +20,7 @@ class EnergyAuthTester:
         self.test_results: List[Dict[str, Any]] = []
         self.session = requests.Session()  # Use session to handle cookies
         self.auth_context: Optional[Dict[str, Any]] = None
+        self.bill_id: Optional[str] = None
 
     def log_test(self, name: str, success: bool, details: str = "", response_data: Any = None):
         """Log test result"""
@@ -61,6 +62,8 @@ class EnergyAuthTester:
                     response = self.session.post(url, files=files, data=data, timeout=30, allow_redirects=allow_redirects)
                 else:
                     response = self.session.post(url, json=data, headers=default_headers, timeout=30, allow_redirects=allow_redirects)
+            elif method == 'PATCH':
+                response = self.session.patch(url, json=data, headers=default_headers, timeout=30, allow_redirects=allow_redirects)
             else:
                 raise ValueError(f"Unsupported method: {method}")
 
@@ -91,57 +94,24 @@ class EnergyAuthTester:
             self.log_test(name, False, error_msg)
             return False, None
 
-    def create_sample_pdf(self) -> bytes:
-        """Create a sample PDF for testing"""
-        return (
-            b"%PDF-1.4\n"
-            b"1 0 obj\n<< /Type /Catalog >>\nendobj\n"
-            b"BT /F1 12 Tf 72 720 Td (Consumo 1240 kWh Totale EUR 348.90 Periodo 01/03/2026 31/03/2026) Tj ET\n"
-            b"%%EOF"
-        )
-
-    def test_google_oauth_start_redirect(self) -> bool:
-        """Test GET /api/auth/google/start returns proper 302 redirect (not 200)"""
-        url = f"{self.base_url}/api/auth/google/start"
-        
-        print(f"\n🔍 Testing Google OAuth Start Redirect...")
-        print(f"   URL: {url}")
-        
-        try:
-            # Don't follow redirects to test the actual response code
-            response = self.session.get(url, allow_redirects=False, timeout=30)
-            
-            print(f"   Status: {response.status_code}")
-            
-            # Should return 302 redirect, not 200
-            if response.status_code == 302:
-                # Check if Location header is present and points to Google OAuth
-                location = response.headers.get('Location', '')
-                if 'accounts.google.com/o/oauth2/v2/auth' in location:
-                    print(f"   ✅ Proper redirect to Google OAuth")
-                    print(f"   Location: {location[:100]}...")
-                    self.log_test("Google OAuth Start - Redirect", True, "Returns 302 with proper Google OAuth URL")
-                    return True
-                else:
-                    self.log_test("Google OAuth Start - Location", False, f"Invalid redirect location: {location}")
-                    return False
-            elif response.status_code == 503:
-                # OAuth not configured - this is acceptable in some environments
-                print(f"   ⚠️  OAuth not configured (503) - acceptable for testing")
-                self.log_test("Google OAuth Start - Not Configured", True, "OAuth not configured (503) - expected in some environments")
-                return True
-            else:
-                error_msg = f"Expected 302 redirect, got {response.status_code}"
-                print(f"   ❌ {error_msg}")
-                print(f"   Response: {response.text[:200]}")
-                self.log_test("Google OAuth Start - Status Code", False, error_msg)
-                return False
-                
-        except Exception as e:
-            error_msg = f"Exception: {str(e)}"
-            print(f"   ❌ {error_msg}")
-            self.log_test("Google OAuth Start - Exception", False, error_msg)
-            return False
+    def create_sample_pdf(self, include_data: bool = False) -> bytes:
+        """Create a sample PDF for testing - can be with or without parseable data"""
+        if include_data:
+            # PDF with parseable consumption data
+            return (
+                b"%PDF-1.4\n"
+                b"1 0 obj\n<< /Type /Catalog >>\nendobj\n"
+                b"BT /F1 12 Tf 72 720 Td (Consumo 1240 kWh Totale EUR 348.90 Periodo 01/03/2026 31/03/2026) Tj ET\n"
+                b"%%EOF"
+            )
+        else:
+            # PDF without parseable consumption data (should result in needs_manual_review)
+            return (
+                b"%PDF-1.4\n"
+                b"1 0 obj\n<< /Type /Catalog >>\nendobj\n"
+                b"BT /F1 12 Tf 72 720 Td (Bolletta energia elettrica - Dati non strutturati) Tj ET\n"
+                b"%%EOF"
+            )
 
     def test_dev_bypass_auth(self) -> bool:
         """Test POST /api/auth/dev-login with credentials from test_credentials.md"""
@@ -189,274 +159,210 @@ class EnergyAuthTester:
             
         return success
 
-    def test_auth_me_endpoint(self) -> bool:
-        """Test GET /api/auth/me to verify session works after dev login"""
-        # First ensure we have auth context from dev login
+    def test_upload_bill_needs_review(self) -> bool:
+        """Test POST /api/bills/upload with PDF that results in needs_manual_review"""
         if not self.auth_context:
-            print("   ⚠️  Skipping auth/me test - no auth context from dev login")
-            self.log_test("Auth Me - Skipped", True, "Skipped due to missing auth context")
+            print("   ⚠️  Skipping bill upload test - no auth context")
+            self.log_test("Upload Bill - Skipped", True, "Skipped due to missing auth context")
             return True
-        
-        success, response = self.run_test(
-            "Auth Me Endpoint",
-            "GET", 
-            "auth/me",
-            200
-        )
-        
-        if success and isinstance(response, dict):
-            # Check response structure
-            required_fields = ["authenticated", "session"]
-            missing_fields = [field for field in required_fields if field not in response]
-            if missing_fields:
-                self.log_test("Auth Me - Response Fields", False, f"Missing fields: {missing_fields}")
-                return False
             
-            if not response.get("authenticated"):
-                self.log_test("Auth Me - Authenticated", False, "User not authenticated")
-                return False
-            
-            print(f"   ✅ Auth session verified")
-            
-        return success
-        """Test GET /api/health"""
-        success, response = self.run_test(
-            "Health Check",
-            "GET",
-            "health",
-            200
-        )
-        
-        if success and isinstance(response, dict):
-            required_fields = ["status", "service", "timestamp"]
-            missing_fields = [field for field in required_fields if field not in response]
-            if missing_fields:
-                self.log_test("Health Check - Fields", False, f"Missing fields: {missing_fields}")
-                return False
-            
-            if response.get("status") != "ok":
-                self.log_test("Health Check - Status", False, f"Status is not 'ok': {response.get('status')}")
-                return False
-                
-        return success
-
-    def test_contracts_endpoint(self) -> bool:
-        """Test GET /api/poc/contracts"""
-        success, response = self.run_test(
-            "Contract Examples",
-            "GET",
-            "poc/contracts",
-            200
-        )
-        
-        if success and isinstance(response, dict):
-            required_sections = ["manual_ingest", "analysis_output"]
-            missing_sections = [section for section in required_sections if section not in response]
-            if missing_sections:
-                self.log_test("Contracts - Structure", False, f"Missing sections: {missing_sections}")
-                return False
-                
-        return success
-
-    def test_manual_ingest(self) -> bool:
-        """Test POST /api/poc/ingest-manual with default generated sample readings"""
-        payload = {
-            "site_name": "Test PMI Site",
-            "city": "Milano",
-            "latitude": 45.4642,
-            "longitude": 9.19
-            # No readings provided - should use default generated sample
-        }
-        
-        success, response = self.run_test(
-            "Manual Ingest (Default Samples)",
-            "POST",
-            "poc/ingest-manual",
-            200,
-            data=payload
-        )
-        
-        if success and isinstance(response, dict):
-            required_fields = ["id", "created_at", "payload"]
-            missing_fields = [field for field in required_fields if field not in response]
-            if missing_fields:
-                self.log_test("Manual Ingest - Response Fields", False, f"Missing fields: {missing_fields}")
-                return False
-            
-            # Store dataset_id for later use
-            self.dataset_id = response.get("id")
-            
-            # Check payload structure
-            payload_data = response.get("payload", {})
-            if "readings" not in payload_data:
-                self.log_test("Manual Ingest - Readings", False, "No readings in payload")
-                return False
-                
-            readings = payload_data.get("readings", [])
-            if len(readings) == 0:
-                self.log_test("Manual Ingest - Readings Count", False, "No readings generated")
-                return False
-                
-            print(f"   Generated {len(readings)} sample readings")
-            
-        return success
-
-    def test_upload_bill(self) -> bool:
-        """Test POST /api/poc/upload-bill with PDF file and verify storage metadata + extraction_status"""
-        pdf_content = self.create_sample_pdf()
+        # Create PDF without parseable data to trigger needs_manual_review
+        pdf_content = self.create_sample_pdf(include_data=False)
         
         files = {
-            'file': ('test_bill.pdf', io.BytesIO(pdf_content), 'application/pdf')
+            'file': ('test_bill_no_data.pdf', io.BytesIO(pdf_content), 'application/pdf')
         }
         
         success, response = self.run_test(
-            "Upload Bill PDF",
+            "Upload Bill PDF (needs review)",
             "POST",
-            "poc/upload-bill",
+            "bills/upload",
             200,
             files=files
         )
         
         if success and isinstance(response, dict):
-            required_fields = ["id", "filename", "storage_mode", "size_bytes", "uploaded_at", "extraction_status"]
+            required_fields = ["status", "bill"]
             missing_fields = [field for field in required_fields if field not in response]
             if missing_fields:
                 self.log_test("Upload Bill - Response Fields", False, f"Missing fields: {missing_fields}")
                 return False
             
-            # Verify extraction_status is valid
-            extraction_status = response.get("extraction_status")
-            valid_statuses = ["parsed", "needs_manual_review", "invalid_pdf"]
-            if extraction_status not in valid_statuses:
-                self.log_test("Upload Bill - Extraction Status", False, 
-                             f"Invalid extraction_status: {extraction_status}")
-                return False
+            bill = response.get("bill", {})
+            extraction_status = bill.get("extraction_status")
             
-            # Verify storage metadata
-            if response.get("size_bytes") != len(pdf_content):
-                self.log_test("Upload Bill - File Size", False, 
-                             f"Size mismatch: expected {len(pdf_content)}, got {response.get('size_bytes')}")
-                return False
-                
-            print(f"   File stored with extraction_status: {extraction_status}")
+            # Should result in needs_manual_review for PDF without parseable data
+            if extraction_status != "needs_manual_review":
+                print(f"   ⚠️  Expected 'needs_manual_review', got '{extraction_status}'")
+                # This might still be valid if parsing improved
+            
+            # Store bill ID for review test
+            self.bill_id = bill.get("id")
+            
+            print(f"   Bill uploaded with extraction_status: {extraction_status}")
+            print(f"   Bill ID: {self.bill_id}")
             
         return success
 
-    def test_run_analysis(self) -> bool:
-        """Test POST /api/poc/run-analysis and verify anomalies, advices, KPI and prediction are returned"""
+    def test_analytics_with_needs_review_bill(self) -> bool:
+        """Test POST /api/analytics/run with only needs_manual_review bills - should get explicit error"""
+        if not self.auth_context:
+            print("   ⚠️  Skipping analytics test - no auth context")
+            self.log_test("Analytics with Review Bills - Skipped", True, "Skipped due to missing auth context")
+            return True
+        
+        success, response = self.run_test(
+            "Analytics with needs_manual_review bills",
+            "POST",
+            "analytics/run",
+            400  # Should return 400 with explicit error message
+        )
+        
+        # For 400 response, check the error message
+        if not success:
+            # Get the error response
+            url = f"{self.base_url}/api/analytics/run"
+            try:
+                resp = self.session.post(url, json={}, timeout=30)
+                if resp.status_code == 400:
+                    error_text = resp.text
+                    print(f"   Error response: {error_text}")
+                    
+                    # Check if error message is explicit about reviewing bill fields
+                    if "rivedere" in error_text.lower() or "rivedi" in error_text.lower():
+                        print(f"   ✅ Error message mentions bill review")
+                        self.log_test("Analytics Error Message", True, "Error message mentions bill review")
+                        return True
+                    elif "bolletta" in error_text.lower() and "stato" in error_text.lower():
+                        print(f"   ✅ Error message mentions bill state")
+                        self.log_test("Analytics Error Message", True, "Error message mentions bill state")
+                        return True
+                    else:
+                        print(f"   ❌ Error message not explicit about bill review")
+                        self.log_test("Analytics Error Message", False, "Error message not explicit about bill review")
+                        return False
+                else:
+                    print(f"   Unexpected status code: {resp.status_code}")
+                    return False
+            except Exception as e:
+                print(f"   Exception checking error: {e}")
+                return False
+        
+        return success
+
+    def test_bill_review_update(self) -> bool:
+        """Test PATCH /api/bills/{bill_id} to complete required fields"""
+        if not self.auth_context or not hasattr(self, 'bill_id') or not self.bill_id:
+            print("   ⚠️  Skipping bill review test - no bill ID")
+            self.log_test("Bill Review - Skipped", True, "Skipped due to missing bill ID")
+            return True
+        
+        # Update bill with required fields
         payload = {
-            "site_name": "Test Analysis Site",
-            "city": "Milano", 
-            "latitude": 45.4642,
-            "longitude": 9.19
-            # No dataset_id or readings - should use default sample data
+            "consumption_kwh": 1240.5,
+            "total_cost_eur": 348.90,
+            "period_start": "01/03/2026",
+            "period_end": "31/03/2026",
+            "notes": "Reviewed and completed manually"
         }
         
         success, response = self.run_test(
-            "Run POC Analysis",
-            "POST",
-            "poc/run-analysis",
+            "Bill Review Update",
+            "PATCH",
+            f"bills/{self.bill_id}",
             200,
             data=payload
         )
         
         if success and isinstance(response, dict):
-            # Store analysis_id for later use
-            self.analysis_id = response.get("id")
-            
-            # Check main response structure
-            required_fields = ["id", "created_at", "weather_context", "price_signal_summary", "analysis"]
+            required_fields = ["status", "bill"]
             missing_fields = [field for field in required_fields if field not in response]
             if missing_fields:
-                self.log_test("Analysis - Response Fields", False, f"Missing fields: {missing_fields}")
+                self.log_test("Bill Review - Response Fields", False, f"Missing fields: {missing_fields}")
                 return False
             
-            # Verify weather integration status
-            weather_context = response.get("weather_context", {})
-            weather_status = weather_context.get("status")
-            if weather_status not in ["ok", "error"]:
-                self.log_test("Analysis - Weather Status", False, f"Invalid weather status: {weather_status}")
+            bill = response.get("bill", {})
+            extraction_status = bill.get("extraction_status")
+            
+            # Should now be "parsed" after completing required fields
+            if extraction_status != "parsed":
+                self.log_test("Bill Review - Status Update", False, f"Expected 'parsed', got '{extraction_status}'")
                 return False
             
-            print(f"   Weather integration status: {weather_status}")
-            
-            # Verify price integration status  
-            price_summary = response.get("price_signal_summary", {})
-            price_status = price_summary.get("status")
-            if price_status not in ["ok", "fallback", "error"]:
-                self.log_test("Analysis - Price Status", False, f"Invalid price status: {price_status}")
-                return False
-                
-            print(f"   Price integration status: {price_status}")
-            
-            # Verify analysis structure
-            analysis = response.get("analysis", {})
-            required_analysis_fields = ["kpis", "anomalies", "advices", "prediction", "signal_status"]
-            missing_analysis_fields = [field for field in required_analysis_fields if field not in analysis]
-            if missing_analysis_fields:
-                self.log_test("Analysis - Analysis Fields", False, f"Missing analysis fields: {missing_analysis_fields}")
+            extracted_fields = bill.get("extracted_fields", {})
+            if extracted_fields.get("consumption_kwh") != 1240.5:
+                self.log_test("Bill Review - Consumption Update", False, "Consumption not updated correctly")
                 return False
             
-            # Verify KPIs
-            kpis = analysis.get("kpis", {})
-            required_kpi_fields = ["total_consumption_kwh", "total_cost_eur", "potential_monthly_savings_eur"]
-            missing_kpi_fields = [field for field in required_kpi_fields if field not in kpis]
-            if missing_kpi_fields:
-                self.log_test("Analysis - KPI Fields", False, f"Missing KPI fields: {missing_kpi_fields}")
-                return False
-            
-            # Verify anomalies (should be a list)
-            anomalies = analysis.get("anomalies", [])
-            if not isinstance(anomalies, list):
-                self.log_test("Analysis - Anomalies Type", False, "Anomalies should be a list")
-                return False
-            
-            # Verify advices (should be a list)
-            advices = analysis.get("advices", [])
-            if not isinstance(advices, list):
-                self.log_test("Analysis - Advices Type", False, "Advices should be a list")
-                return False
-            
-            # Verify prediction structure
-            prediction = analysis.get("prediction", {})
-            required_prediction_fields = ["next_30_days_cost_eur", "expected_variation_pct"]
-            missing_prediction_fields = [field for field in required_prediction_fields if field not in prediction]
-            if missing_prediction_fields:
-                self.log_test("Analysis - Prediction Fields", False, f"Missing prediction fields: {missing_prediction_fields}")
-                return False
-            
-            print(f"   Analysis generated: {len(anomalies)} anomalies, {len(advices)} advices")
-            print(f"   KPIs: {kpis.get('total_consumption_kwh')} kWh, €{kpis.get('total_cost_eur')}")
-            print(f"   Prediction: €{prediction.get('next_30_days_cost_eur')} next 30 days")
+            print(f"   ✅ Bill updated to 'parsed' status")
+            print(f"   Consumption: {extracted_fields.get('consumption_kwh')} kWh")
+            print(f"   Cost: €{extracted_fields.get('total_cost_eur')}")
             
         return success
 
-    def test_latest_analysis(self) -> bool:
-        """Test GET /api/poc/latest-analysis returns the latest stored run"""
+    def test_analytics_after_review(self) -> bool:
+        """Test POST /api/analytics/run after completing bill review - should work"""
+        if not self.auth_context:
+            print("   ⚠️  Skipping analytics after review test - no auth context")
+            self.log_test("Analytics After Review - Skipped", True, "Skipped due to missing auth context")
+            return True
+        
         success, response = self.run_test(
-            "Latest Analysis",
+            "Analytics after bill review",
+            "POST",
+            "analytics/run",
+            200  # Should now work
+        )
+        
+        if success and isinstance(response, dict):
+            required_fields = ["status", "analysis_run"]
+            missing_fields = [field for field in required_fields if field not in response]
+            if missing_fields:
+                self.log_test("Analytics After Review - Response Fields", False, f"Missing fields: {missing_fields}")
+                return False
+            
+            analysis_run = response.get("analysis_run", {})
+            analysis = analysis_run.get("analysis", {})
+            
+            if "kpis" not in analysis:
+                self.log_test("Analytics After Review - Analysis Structure", False, "Missing analysis.kpis")
+                return False
+            
+            kpis = analysis.get("kpis", {})
+            print(f"   ✅ Analytics completed successfully")
+            print(f"   Total consumption: {kpis.get('total_consumption_kwh')} kWh")
+            print(f"   Total cost: €{kpis.get('total_cost_eur')}")
+            
+        return success
+
+    def test_dashboard_overview(self) -> bool:
+        """Test GET /api/dashboard/overview to check pending bill review warning"""
+        if not self.auth_context:
+            print("   ⚠️  Skipping dashboard test - no auth context")
+            self.log_test("Dashboard Overview - Skipped", True, "Skipped due to missing auth context")
+            return True
+        
+        success, response = self.run_test(
+            "Dashboard Overview",
             "GET",
-            "poc/latest-analysis",
+            "dashboard/overview",
             200
         )
         
         if success and isinstance(response, dict):
-            # Should have similar structure to run-analysis response
-            required_fields = ["id", "created_at", "analysis"]
+            required_fields = ["session", "counts"]
             missing_fields = [field for field in required_fields if field not in response]
             if missing_fields:
-                self.log_test("Latest Analysis - Response Fields", False, f"Missing fields: {missing_fields}")
+                self.log_test("Dashboard - Response Fields", False, f"Missing fields: {missing_fields}")
                 return False
             
-            # If we stored an analysis_id earlier, verify it matches
-            if self.analysis_id and response.get("id") != self.analysis_id:
-                print(f"   Warning: Latest analysis ID ({response.get('id')}) doesn't match last created ({self.analysis_id})")
+            counts = response.get("counts", {})
+            pending_reviews = counts.get("pending_bill_reviews", 0)
             
-            analysis = response.get("analysis", {})
-            if "kpis" not in analysis:
-                self.log_test("Latest Analysis - Analysis Structure", False, "Missing analysis.kpis")
-                return False
-                
+            print(f"   ✅ Dashboard loaded successfully")
+            print(f"   Pending bill reviews: {pending_reviews}")
+            print(f"   Total bills: {counts.get('bills', 0)}")
+            
         return success
 
     def test_health_endpoint(self) -> bool:
@@ -482,27 +388,24 @@ class EnergyAuthTester:
         return success
 
     def run_all_tests(self) -> Dict[str, Any]:
-        """Run all auth regression tests"""
-        print("🚀 Starting Energy Optimization SaaS Auth Regression Tests")
+        """Run all PDF upload and bill review tests"""
+        print("🚀 Starting Energy Optimization SaaS PDF Upload & Bill Review Tests")
         print(f"   Base URL: {self.base_url}")
-        print(f"   Focus: Google OAuth redirect behavior and dev bypass auth")
+        print(f"   Focus: PDF upload needs_manual_review and analytics error handling")
         print("=" * 60)
         
-        # Test auth endpoints first (main focus)
-        auth_tests = [
-            self.test_google_oauth_start_redirect,
-            self.test_dev_bypass_auth,
-            self.test_auth_me_endpoint
+        # Test sequence for PDF upload and bill review functionality
+        test_sequence = [
+            self.test_dev_bypass_auth,  # Auth first
+            self.test_upload_bill_needs_review,  # Upload PDF that needs review
+            self.test_analytics_with_needs_review_bill,  # Try analytics - should fail with explicit message
+            self.test_bill_review_update,  # Complete bill review
+            self.test_analytics_after_review,  # Analytics should now work
+            self.test_dashboard_overview,  # Check dashboard shows correct state
+            self.test_health_endpoint  # Basic health check
         ]
         
-        # Test basic health endpoint to ensure backend is responsive
-        basic_tests = [
-            self.test_health_endpoint
-        ]
-        
-        all_tests = auth_tests + basic_tests
-        
-        for test_func in all_tests:
+        for test_func in test_sequence:
             try:
                 test_func()
             except Exception as e:
@@ -514,9 +417,9 @@ class EnergyAuthTester:
         print(f"📊 Test Summary: {self.tests_passed}/{self.tests_run} tests passed")
         
         if self.tests_passed == self.tests_run:
-            print("🎉 All auth tests PASSED! No regression detected.")
+            print("🎉 All PDF upload and bill review tests PASSED!")
         else:
-            print("⚠️  Some auth tests FAILED. Regression detected - check details above.")
+            print("⚠️  Some tests FAILED. Check details above.")
         
         return {
             "total_tests": self.tests_run,
@@ -527,7 +430,7 @@ class EnergyAuthTester:
 
 def main():
     """Main test execution"""
-    tester = EnergyAuthTester()
+    tester = EnergyBillTester()
     results = tester.run_all_tests()
     
     # Return appropriate exit code

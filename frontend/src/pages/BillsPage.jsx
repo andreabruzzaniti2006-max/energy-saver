@@ -42,9 +42,13 @@ export default function BillsPage() {
       setUploading(true);
       const formData = new FormData();
       formData.append("file", selectedFile);
-      await api.post("/bills/upload", formData, { headers: { "Content-Type": "multipart/form-data" } });
+      const { data } = await api.post("/bills/upload", formData, { headers: { "Content-Type": "multipart/form-data" } });
       setSelectedFile(null);
       toast.success("Bolletta caricata con successo");
+      if (data.bill?.extraction_status !== "parsed") {
+        openReview(data.bill);
+        toast.message("Bolletta caricata ma da rivedere: completa consumo, costo e periodo per sbloccare l’analisi.");
+      }
       await loadBills();
     } catch (error) {
       toast.error(extractApiError(error, "Upload bolletta fallito"));
