@@ -416,7 +416,7 @@ async def gather_site_readings(site_id: str) -> List[Dict[str, Any]]:
             for item in manual
         ]
 
-    bills = await db.bills.find({"site_id": site_id}).sort("uploaded_at", 1).to_list(200)
+    bills = await db.bills.find({"site_id": site_id, "extraction_status": "parsed"}).sort("uploaded_at", 1).to_list(200)
     expanded: List[Dict[str, Any]] = []
     for bill in bills:
         fields = bill.get("extracted_fields", {})
@@ -890,7 +890,7 @@ async def review_bill(bill_id: str, payload: BillReviewPayload, ctx: AuthContext
         value = getattr(payload, key)
         if value is not None:
             updated_fields[key] = value
-    extraction_status = "parsed" if updated_fields.get("consumption_kwh") or updated_fields.get("total_cost_eur") else "needs_manual_review"
+    extraction_status = "parsed" if updated_fields.get("consumption_kwh") is not None and updated_fields.get("total_cost_eur") is not None else "needs_manual_review"
     await db.bills.update_one(
         {"_id": bill["_id"]},
         {
@@ -962,6 +962,21 @@ async def delete_consumption_entry(entry_id: str, ctx: AuthContext = Depends(get
 
 @api_router.post("/analytics/run")
 async def run_analysis(ctx: AuthContext = Depends(get_auth_context)):
+    # Check for pending bill reviews first, regardless of manual consumption data
+    pending_bill_reviews = await db.bills.count_documents({
+        "org_id": ctx.org["id"],
+        "site_id": ctx.site["id"],
+        "extraction_status": {"$ne": "parsed"},
+    })
+    if pending_bill_reviews:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Hai già caricato {pending_bill_reviews} bolletta/e, ma sono in stato 'Da rivedere'. "
+                "Apri Bollette > Rivedi e compila almeno consumo, costo e periodo per sbloccare l'analisi."
+            ),
+        )
+    
     readings = await gather_site_readings(ctx.site["id"])
     if not readings:
         pending_bill_reviews = await db.bills.count_documents({
@@ -1082,6 +1097,12 @@ async def send_test_email(ctx: AuthContext = Depends(get_auth_context)):
 
 @api_router.get("/dashboard/overview")
 async def dashboard_overview(ctx: AuthContext = Depends(get_auth_context)):
+    bills_count = await db.bills.count_documents({"org_id": ctx.org["id"], "site_id": ctx.site["id"]})
+    pending_bill_reviews = await db.bills.count_documents({
+        "org_id": ctx.org["id"],
+        "site_id": ctx.site["id"],
+        "extraction_status": {"$ne": "parsed"},
+    })
     bills = await db.bills.find({"org_id": ctx.org["id"], "site_id": ctx.site["id"]}).sort("uploaded_at", -1).to_list(5)
     readings_count = await db.consumption_readings.count_documents({"org_id": ctx.org["id"], "site_id": ctx.site["id"]})
     reports_count = await db.reports.count_documents({"org_id": ctx.org["id"], "site_id": ctx.site["id"]})
@@ -1103,11 +1124,11 @@ async def dashboard_overview(ctx: AuthContext = Depends(get_auth_context)):
             "google_oauth_configured": bool(os.getenv("GOOGLE_CLIENT_ID") and os.getenv("GOOGLE_CLIENT_SECRET")),
         },
         "counts": {
-            "bills": len(bills),
+            "bills": bills_count,
             "readings": readings_count,
             "reports": reports_count,
             "unread_notifications": unread_notifications,
-            "pending_bill_reviews": sum(1 for item in bills if item.get("extraction_status") != "parsed"),
+            "pending_bill_reviews": pending_bill_reviews,
         },
         "latest_analysis": serialize_doc(latest),
         "recent_bills": [serialize_doc(item) for item in bills],

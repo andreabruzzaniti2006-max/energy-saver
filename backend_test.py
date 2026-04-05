@@ -1,440 +1,334 @@
 #!/usr/bin/env python3
-"""
-Backend API Testing for Energy Optimization SaaS
-Tests PDF upload and bill review functionality as specified in the review request.
-Focus: PDF upload that results in needs_manual_review and analytics error handling.
-"""
 
 import requests
 import sys
 import json
-import io
-from datetime import datetime, timezone
-from typing import Dict, Any, List, Optional
+import time
+from datetime import datetime
 
-class EnergyBillTester:
-    def __init__(self, base_url: str = "https://energy-saver-16.preview.emergentagent.com"):
+class EnergyOptimizerTester:
+    def __init__(self, base_url="https://energy-saver-16.preview.emergentagent.com"):
         self.base_url = base_url
+        self.session = requests.Session()
         self.tests_run = 0
         self.tests_passed = 0
-        self.test_results: List[Dict[str, Any]] = []
-        self.session = requests.Session()  # Use session to handle cookies
-        self.auth_context: Optional[Dict[str, Any]] = None
-        self.bill_id: Optional[str] = None
+        self.test_results = []
 
-    def log_test(self, name: str, success: bool, details: str = "", response_data: Any = None):
+    def log_test(self, name, success, details="", error=""):
         """Log test result"""
         self.tests_run += 1
         if success:
             self.tests_passed += 1
-            print(f"✅ {name}: PASSED")
+            print(f"✅ {name}")
         else:
-            print(f"❌ {name}: FAILED - {details}")
+            print(f"❌ {name} - {error}")
         
         self.test_results.append({
-            "test_name": name,
+            "name": name,
             "success": success,
             "details": details,
-            "response_data": response_data if success else None
+            "error": error
         })
 
-    def run_test(self, name: str, method: str, endpoint: str, expected_status: int, 
-                 data: Any = None, files: Any = None, headers: Dict[str, str] = None, 
-                 allow_redirects: bool = True) -> tuple[bool, Any]:
-        """Run a single API test"""
-        url = f"{self.base_url}/api/{endpoint}"
-        default_headers = {'Content-Type': 'application/json'}
-        if headers:
-            default_headers.update(headers)
-        
-        # Remove Content-Type for file uploads
-        if files:
-            default_headers.pop('Content-Type', None)
-
-        print(f"\n🔍 Testing {name}...")
-        print(f"   URL: {url}")
-        
+    def test_health_check(self):
+        """Test basic health endpoint"""
         try:
-            if method == 'GET':
-                response = self.session.get(url, headers=default_headers, timeout=30, allow_redirects=allow_redirects)
-            elif method == 'POST':
-                if files:
-                    response = self.session.post(url, files=files, data=data, timeout=30, allow_redirects=allow_redirects)
-                else:
-                    response = self.session.post(url, json=data, headers=default_headers, timeout=30, allow_redirects=allow_redirects)
-            elif method == 'PATCH':
-                response = self.session.patch(url, json=data, headers=default_headers, timeout=30, allow_redirects=allow_redirects)
-            else:
-                raise ValueError(f"Unsupported method: {method}")
+            response = self.session.get(f"{self.base_url}/api/health", timeout=10)
+            success = response.status_code == 200
+            self.log_test("Health Check", success, 
+                         f"Status: {response.status_code}" if success else "",
+                         f"Status: {response.status_code}" if not success else "")
+            return success
+        except Exception as e:
+            self.log_test("Health Check", False, error=str(e))
+            return False
 
-            print(f"   Status: {response.status_code}")
+    def test_dev_login(self):
+        """Test dev bypass login"""
+        try:
+            payload = {
+                "email": "demo@energysaver.app",
+                "name": "Energy Saver Demo",
+                "company_name": "Energy Saver Demo"
+            }
+            response = self.session.post(f"{self.base_url}/api/auth/dev-login", 
+                                       json=payload, timeout=10)
+            success = response.status_code == 200
+            if success:
+                data = response.json()
+                success = data.get("status") == "success" and "session" in data
             
-            success = response.status_code == expected_status
-            response_data = None
+            self.log_test("Dev Bypass Login", success,
+                         "Login successful, session created" if success else "",
+                         f"Status: {response.status_code}, Response: {response.text[:200]}" if not success else "")
+            return success
+        except Exception as e:
+            self.log_test("Dev Bypass Login", False, error=str(e))
+            return False
+
+    def test_auth_me(self):
+        """Test session validation"""
+        try:
+            response = self.session.get(f"{self.base_url}/api/auth/me", timeout=10)
+            success = response.status_code == 200
+            if success:
+                data = response.json()
+                success = data.get("authenticated") == True and "session" in data
+            
+            self.log_test("Session Validation", success,
+                         "Session valid and authenticated" if success else "",
+                         f"Status: {response.status_code}" if not success else "")
+            return success
+        except Exception as e:
+            self.log_test("Session Validation", False, error=str(e))
+            return False
+
+    def upload_test_pdf(self, filename="test_bill.pdf"):
+        """Upload a test PDF that should land in needs_manual_review"""
+        try:
+            # Create a test PDF that will trigger needs_manual_review
+            pdf_content = b"%PDF-1.4\n1 0 obj\n<< /Type /Catalog >>\nendobj\nBT /F1 12 Tf 72 720 Td (Test Bill - No clear consumption or cost data) Tj ET\n%%EOF"
+            
+            files = {'file': (filename, pdf_content, 'application/pdf')}
+            response = self.session.post(f"{self.base_url}/api/bills/upload", 
+                                       files=files, timeout=15)
+            
+            success = response.status_code == 200
+            bill_id = None
+            extraction_status = None
             
             if success:
-                try:
-                    response_data = response.json()
-                    print(f"   Response keys: {list(response_data.keys()) if isinstance(response_data, dict) else 'Non-dict response'}")
-                except:
-                    response_data = response.text
-                    print(f"   Response (text): {response_data[:200]}...")
-            else:
-                print(f"   Error: {response.text[:300]}")
-
-            self.log_test(name, success, 
-                         f"Expected {expected_status}, got {response.status_code}" if not success else "",
-                         response_data)
+                data = response.json()
+                success = data.get("status") == "success" and "bill" in data
+                if success:
+                    bill_id = data["bill"]["id"]
+                    extraction_status = data["bill"]["extraction_status"]
             
-            return success, response_data
-
+            self.log_test("Upload PDF (needs review)", success,
+                         f"Bill ID: {bill_id}, Status: {extraction_status}" if success else "",
+                         f"Status: {response.status_code}, Response: {response.text[:200]}" if not success else "")
+            
+            return success, bill_id, extraction_status
         except Exception as e:
-            error_msg = f"Exception: {str(e)}"
-            print(f"   {error_msg}")
-            self.log_test(name, False, error_msg)
-            return False, None
+            self.log_test("Upload PDF (needs review)", False, error=str(e))
+            return False, None, None
 
-    def create_sample_pdf(self, include_data: bool = False) -> bytes:
-        """Create a sample PDF for testing - can be with or without parseable data"""
-        if include_data:
-            # PDF with parseable consumption data
-            return (
-                b"%PDF-1.4\n"
-                b"1 0 obj\n<< /Type /Catalog >>\nendobj\n"
-                b"BT /F1 12 Tf 72 720 Td (Consumo 1240 kWh Totale EUR 348.90 Periodo 01/03/2026 31/03/2026) Tj ET\n"
-                b"%%EOF"
-            )
-        else:
-            # PDF without parseable consumption data (should result in needs_manual_review)
-            return (
-                b"%PDF-1.4\n"
-                b"1 0 obj\n<< /Type /Catalog >>\nendobj\n"
-                b"BT /F1 12 Tf 72 720 Td (Bolletta energia elettrica - Dati non strutturati) Tj ET\n"
-                b"%%EOF"
-            )
+    def test_analytics_blocked_with_unreviewed_bills(self):
+        """Test that analytics is blocked when only bills with needs_manual_review exist"""
+        try:
+            response = self.session.post(f"{self.base_url}/api/analytics/run", timeout=20)
+            
+            # Should return 400 with explicit error message about pending reviews
+            success = response.status_code == 400
+            error_message = ""
+            
+            if response.status_code == 400:
+                try:
+                    data = response.json()
+                    error_message = data.get("detail", "")
+                    # Check if error message mentions bill review requirement
+                    success = "rivedere" in error_message.lower() or "review" in error_message.lower()
+                except:
+                    success = False
+            
+            self.log_test("Analytics Blocked (unreviewed bills)", success,
+                         f"Correctly blocked with message: {error_message}" if success else "",
+                         f"Expected 400 with review message, got {response.status_code}: {response.text[:200]}" if not success else "")
+            
+            return success
+        except Exception as e:
+            self.log_test("Analytics Blocked (unreviewed bills)", False, error=str(e))
+            return False
 
-    def test_dev_bypass_auth(self) -> bool:
-        """Test POST /api/auth/dev-login with credentials from test_credentials.md"""
-        payload = {
-            "email": "demo@energysaver.app",
-            "name": "Energy Saver Demo", 
-            "company_name": "Energy Saver Demo"
-        }
-        
-        success, response = self.run_test(
-            "Dev Bypass Auth Login",
-            "POST",
-            "auth/dev-login",
-            200,
-            data=payload
-        )
-        
-        if success and isinstance(response, dict):
-            # Check response structure
-            required_fields = ["status", "session"]
-            missing_fields = [field for field in required_fields if field not in response]
-            if missing_fields:
-                self.log_test("Dev Auth - Response Fields", False, f"Missing fields: {missing_fields}")
-                return False
+    def complete_bill_review(self, bill_id):
+        """Complete bill review with valid data"""
+        try:
+            review_data = {
+                "consumption_kwh": 1240.5,
+                "total_cost_eur": 348.90,
+                "period_start": "01/03/2026",
+                "period_end": "31/03/2026",
+                "notes": "Test review completion"
+            }
             
-            if response.get("status") != "success":
-                self.log_test("Dev Auth - Status", False, f"Status is not 'success': {response.get('status')}")
-                return False
+            response = self.session.patch(f"{self.base_url}/api/bills/{bill_id}", 
+                                        json=review_data, timeout=10)
             
-            # Check session structure
-            session = response.get("session", {})
-            required_session_fields = ["user", "org", "site"]
-            missing_session_fields = [field for field in required_session_fields if field not in session]
-            if missing_session_fields:
-                self.log_test("Dev Auth - Session Fields", False, f"Missing session fields: {missing_session_fields}")
-                return False
+            success = response.status_code == 200
+            new_status = None
             
-            # Store auth context for further tests
-            self.auth_context = response
+            if success:
+                data = response.json()
+                success = data.get("status") == "success" and "bill" in data
+                if success:
+                    new_status = data["bill"]["extraction_status"]
+                    success = new_status == "parsed"
             
-            print(f"   ✅ Dev bypass auth successful")
-            print(f"   User: {session.get('user', {}).get('email')}")
-            print(f"   Org: {session.get('org', {}).get('name')}")
-            print(f"   Site: {session.get('site', {}).get('name')}")
+            self.log_test("Complete Bill Review", success,
+                         f"Status changed to: {new_status}" if success else "",
+                         f"Status: {response.status_code}, Response: {response.text[:200]}" if not success else "")
             
-        return success
+            return success
+        except Exception as e:
+            self.log_test("Complete Bill Review", False, error=str(e))
+            return False
 
-    def test_upload_bill_needs_review(self) -> bool:
-        """Test POST /api/bills/upload with PDF that results in needs_manual_review"""
-        if not self.auth_context:
-            print("   ⚠️  Skipping bill upload test - no auth context")
-            self.log_test("Upload Bill - Skipped", True, "Skipped due to missing auth context")
-            return True
+    def test_analytics_succeeds_after_review(self):
+        """Test that analytics succeeds after bill review completion"""
+        try:
+            response = self.session.post(f"{self.base_url}/api/analytics/run", timeout=30)
             
-        # Create PDF without parseable data to trigger needs_manual_review
-        pdf_content = self.create_sample_pdf(include_data=False)
-        
-        files = {
-            'file': ('test_bill_no_data.pdf', io.BytesIO(pdf_content), 'application/pdf')
-        }
-        
-        success, response = self.run_test(
-            "Upload Bill PDF (needs review)",
-            "POST",
-            "bills/upload",
-            200,
-            files=files
-        )
-        
-        if success and isinstance(response, dict):
-            required_fields = ["status", "bill"]
-            missing_fields = [field for field in required_fields if field not in response]
-            if missing_fields:
-                self.log_test("Upload Bill - Response Fields", False, f"Missing fields: {missing_fields}")
-                return False
+            success = response.status_code == 200
+            analysis_data = None
             
-            bill = response.get("bill", {})
-            extraction_status = bill.get("extraction_status")
+            if success:
+                data = response.json()
+                success = data.get("status") == "success" and "analysis_run" in data
+                if success:
+                    analysis_data = data["analysis_run"]
             
-            # Should result in needs_manual_review for PDF without parseable data
-            if extraction_status != "needs_manual_review":
-                print(f"   ⚠️  Expected 'needs_manual_review', got '{extraction_status}'")
-                # This might still be valid if parsing improved
+            self.log_test("Analytics Success (after review)", success,
+                         f"Analysis completed with {len(analysis_data.get('analysis', {}).get('advices', []))} advices" if success and analysis_data else "",
+                         f"Status: {response.status_code}, Response: {response.text[:200]}" if not success else "")
             
-            # Store bill ID for review test
-            self.bill_id = bill.get("id")
-            
-            print(f"   Bill uploaded with extraction_status: {extraction_status}")
-            print(f"   Bill ID: {self.bill_id}")
-            
-        return success
+            return success
+        except Exception as e:
+            self.log_test("Analytics Success (after review)", False, error=str(e))
+            return False
 
-    def test_analytics_with_needs_review_bill(self) -> bool:
-        """Test POST /api/analytics/run with only needs_manual_review bills - should get explicit error"""
-        if not self.auth_context:
-            print("   ⚠️  Skipping analytics test - no auth context")
-            self.log_test("Analytics with Review Bills - Skipped", True, "Skipped due to missing auth context")
-            return True
-        
-        success, response = self.run_test(
-            "Analytics with needs_manual_review bills",
-            "POST",
-            "analytics/run",
-            400  # Should return 400 with explicit error message
-        )
-        
-        # For 400 response, check the error message
-        if not success:
-            # Get the error response
-            url = f"{self.base_url}/api/analytics/run"
-            try:
-                resp = self.session.post(url, json={}, timeout=30)
-                if resp.status_code == 400:
-                    error_text = resp.text
-                    print(f"   Error response: {error_text}")
-                    
-                    # Check if error message is explicit about reviewing bill fields
-                    if "rivedere" in error_text.lower() or "rivedi" in error_text.lower():
-                        print(f"   ✅ Error message mentions bill review")
-                        self.log_test("Analytics Error Message", True, "Error message mentions bill review")
-                        return True
-                    elif "bolletta" in error_text.lower() and "stato" in error_text.lower():
-                        print(f"   ✅ Error message mentions bill state")
-                        self.log_test("Analytics Error Message", True, "Error message mentions bill state")
-                        return True
-                    else:
-                        print(f"   ❌ Error message not explicit about bill review")
-                        self.log_test("Analytics Error Message", False, "Error message not explicit about bill review")
-                        return False
-                else:
-                    print(f"   Unexpected status code: {resp.status_code}")
-                    return False
-            except Exception as e:
-                print(f"   Exception checking error: {e}")
+    def test_dashboard_warning_for_pending_reviews(self):
+        """Test dashboard shows warning for pending bill reviews"""
+        try:
+            # First upload another bill that needs review
+            pdf_content = b"%PDF-1.4\n1 0 obj\n<< /Type /Catalog >>\nendobj\nBT /F1 12 Tf 72 720 Td (Another test bill needing review) Tj ET\n%%EOF"
+            files = {'file': ('pending_bill.pdf', pdf_content, 'application/pdf')}
+            upload_response = self.session.post(f"{self.base_url}/api/bills/upload", files=files, timeout=15)
+            
+            if upload_response.status_code != 200:
+                self.log_test("Dashboard Warning (pending reviews)", False, 
+                             error="Failed to upload test bill for pending review test")
                 return False
-        
-        return success
+            
+            # Now check dashboard
+            response = self.session.get(f"{self.base_url}/api/dashboard/overview", timeout=10)
+            
+            success = response.status_code == 200
+            pending_count = 0
+            
+            if success:
+                data = response.json()
+                pending_count = data.get("counts", {}).get("pending_bill_reviews", 0)
+                success = pending_count > 0
+            
+            self.log_test("Dashboard Warning (pending reviews)", success,
+                         f"Found {pending_count} pending bill reviews" if success else "",
+                         f"Status: {response.status_code}, No pending reviews found" if not success else "")
+            
+            return success
+        except Exception as e:
+            self.log_test("Dashboard Warning (pending reviews)", False, error=str(e))
+            return False
 
-    def test_bill_review_update(self) -> bool:
-        """Test PATCH /api/bills/{bill_id} to complete required fields"""
-        if not self.auth_context or not hasattr(self, 'bill_id') or not self.bill_id:
-            print("   ⚠️  Skipping bill review test - no bill ID")
-            self.log_test("Bill Review - Skipped", True, "Skipped due to missing bill ID")
-            return True
-        
-        # Update bill with required fields
-        payload = {
-            "consumption_kwh": 1240.5,
-            "total_cost_eur": 348.90,
-            "period_start": "01/03/2026",
-            "period_end": "31/03/2026",
-            "notes": "Reviewed and completed manually"
-        }
-        
-        success, response = self.run_test(
-            "Bill Review Update",
-            "PATCH",
-            f"bills/{self.bill_id}",
-            200,
-            data=payload
-        )
-        
-        if success and isinstance(response, dict):
-            required_fields = ["status", "bill"]
-            missing_fields = [field for field in required_fields if field not in response]
-            if missing_fields:
-                self.log_test("Bill Review - Response Fields", False, f"Missing fields: {missing_fields}")
-                return False
+    def test_session_persistence_across_requests(self):
+        """Test that dev login session persists across multiple requests"""
+        try:
+            # Make multiple authenticated requests to verify session persistence
+            endpoints = ["/api/auth/me", "/api/dashboard/overview", "/api/bills"]
+            all_success = True
             
-            bill = response.get("bill", {})
-            extraction_status = bill.get("extraction_status")
+            for endpoint in endpoints:
+                response = self.session.get(f"{self.base_url}{endpoint}", timeout=10)
+                if response.status_code != 200:
+                    all_success = False
+                    break
+                # Small delay to simulate navigation
+                time.sleep(0.1)
             
-            # Should now be "parsed" after completing required fields
-            if extraction_status != "parsed":
-                self.log_test("Bill Review - Status Update", False, f"Expected 'parsed', got '{extraction_status}'")
-                return False
+            self.log_test("Session Persistence", all_success,
+                         "Session maintained across multiple requests" if all_success else "",
+                         "Session lost during request sequence" if not all_success else "")
             
-            extracted_fields = bill.get("extracted_fields", {})
-            if extracted_fields.get("consumption_kwh") != 1240.5:
-                self.log_test("Bill Review - Consumption Update", False, "Consumption not updated correctly")
-                return False
-            
-            print(f"   ✅ Bill updated to 'parsed' status")
-            print(f"   Consumption: {extracted_fields.get('consumption_kwh')} kWh")
-            print(f"   Cost: €{extracted_fields.get('total_cost_eur')}")
-            
-        return success
+            return all_success
+        except Exception as e:
+            self.log_test("Session Persistence", False, error=str(e))
+            return False
 
-    def test_analytics_after_review(self) -> bool:
-        """Test POST /api/analytics/run after completing bill review - should work"""
-        if not self.auth_context:
-            print("   ⚠️  Skipping analytics after review test - no auth context")
-            self.log_test("Analytics After Review - Skipped", True, "Skipped due to missing auth context")
-            return True
+    def run_comprehensive_test(self):
+        """Run all tests in sequence"""
+        print("🚀 Starting Energy Optimization SaaS V1 Bug Fix Verification")
+        print("=" * 70)
         
-        success, response = self.run_test(
-            "Analytics after bill review",
-            "POST",
-            "analytics/run",
-            200  # Should now work
-        )
+        # Basic connectivity
+        if not self.test_health_check():
+            print("❌ Health check failed, stopping tests")
+            return False
         
-        if success and isinstance(response, dict):
-            required_fields = ["status", "analysis_run"]
-            missing_fields = [field for field in required_fields if field not in response]
-            if missing_fields:
-                self.log_test("Analytics After Review - Response Fields", False, f"Missing fields: {missing_fields}")
-                return False
-            
-            analysis_run = response.get("analysis_run", {})
-            analysis = analysis_run.get("analysis", {})
-            
-            if "kpis" not in analysis:
-                self.log_test("Analytics After Review - Analysis Structure", False, "Missing analysis.kpis")
-                return False
-            
-            kpis = analysis.get("kpis", {})
-            print(f"   ✅ Analytics completed successfully")
-            print(f"   Total consumption: {kpis.get('total_consumption_kwh')} kWh")
-            print(f"   Total cost: €{kpis.get('total_cost_eur')}")
-            
-        return success
-
-    def test_dashboard_overview(self) -> bool:
-        """Test GET /api/dashboard/overview to check pending bill review warning"""
-        if not self.auth_context:
-            print("   ⚠️  Skipping dashboard test - no auth context")
-            self.log_test("Dashboard Overview - Skipped", True, "Skipped due to missing auth context")
-            return True
+        # Authentication flow with retry logic
+        if not self.test_dev_login():
+            print("❌ Dev login failed, stopping tests")
+            return False
         
-        success, response = self.run_test(
-            "Dashboard Overview",
-            "GET",
-            "dashboard/overview",
-            200
-        )
+        # Verify session is working
+        if not self.test_auth_me():
+            print("❌ Session validation failed, stopping tests")
+            return False
         
-        if success and isinstance(response, dict):
-            required_fields = ["session", "counts"]
-            missing_fields = [field for field in required_fields if field not in response]
-            if missing_fields:
-                self.log_test("Dashboard - Response Fields", False, f"Missing fields: {missing_fields}")
-                return False
-            
-            counts = response.get("counts", {})
-            pending_reviews = counts.get("pending_bill_reviews", 0)
-            
-            print(f"   ✅ Dashboard loaded successfully")
-            print(f"   Pending bill reviews: {pending_reviews}")
-            print(f"   Total bills: {counts.get('bills', 0)}")
-            
-        return success
-
-    def test_health_endpoint(self) -> bool:
-        """Test GET /api/health"""
-        success, response = self.run_test(
-            "Health Check",
-            "GET",
-            "health",
-            200
-        )
+        # Test session persistence
+        self.test_session_persistence_across_requests()
         
-        if success and isinstance(response, dict):
-            required_fields = ["status", "service", "timestamp"]
-            missing_fields = [field for field in required_fields if field not in response]
-            if missing_fields:
-                self.log_test("Health Check - Fields", False, f"Missing fields: {missing_fields}")
-                return False
-            
-            if response.get("status") != "ok":
-                self.log_test("Health Check - Status", False, f"Status is not 'ok': {response.get('status')}")
-                return False
-                
-        return success
-
-    def run_all_tests(self) -> Dict[str, Any]:
-        """Run all PDF upload and bill review tests"""
-        print("🚀 Starting Energy Optimization SaaS PDF Upload & Bill Review Tests")
-        print(f"   Base URL: {self.base_url}")
-        print(f"   Focus: PDF upload needs_manual_review and analytics error handling")
-        print("=" * 60)
+        # Test the main bug fix: analytics should be blocked with unreviewed bills
+        print("\n📋 Testing analytics blocking with unreviewed bills...")
         
-        # Test sequence for PDF upload and bill review functionality
-        test_sequence = [
-            self.test_dev_bypass_auth,  # Auth first
-            self.test_upload_bill_needs_review,  # Upload PDF that needs review
-            self.test_analytics_with_needs_review_bill,  # Try analytics - should fail with explicit message
-            self.test_bill_review_update,  # Complete bill review
-            self.test_analytics_after_review,  # Analytics should now work
-            self.test_dashboard_overview,  # Check dashboard shows correct state
-            self.test_health_endpoint  # Basic health check
-        ]
+        # Upload a PDF that will need manual review
+        upload_success, bill_id, extraction_status = self.upload_test_pdf()
+        if not upload_success:
+            print("❌ PDF upload failed, cannot test analytics blocking")
+            return False
         
-        for test_func in test_sequence:
-            try:
-                test_func()
-            except Exception as e:
-                print(f"❌ Test {test_func.__name__} crashed: {str(e)}")
-                self.log_test(test_func.__name__, False, f"Test crashed: {str(e)}")
+        if extraction_status != "needs_manual_review":
+            print(f"⚠️  Expected 'needs_manual_review', got '{extraction_status}' - may affect test validity")
+        
+        # Test that analytics is properly blocked
+        analytics_blocked = self.test_analytics_blocked_with_unreviewed_bills()
+        
+        # Complete the bill review
+        if bill_id:
+            review_success = self.complete_bill_review(bill_id)
+            if review_success:
+                # Test that analytics now succeeds
+                self.test_analytics_succeeds_after_review()
+        
+        # Test dashboard warning functionality
+        self.test_dashboard_warning_for_pending_reviews()
         
         # Print summary
-        print("\n" + "=" * 60)
+        print("\n" + "=" * 70)
         print(f"📊 Test Summary: {self.tests_passed}/{self.tests_run} tests passed")
         
         if self.tests_passed == self.tests_run:
-            print("🎉 All PDF upload and bill review tests PASSED!")
+            print("🎉 All tests passed! Bug fixes verified successfully.")
+            return True
         else:
-            print("⚠️  Some tests FAILED. Check details above.")
-        
-        return {
-            "total_tests": self.tests_run,
-            "passed_tests": self.tests_passed,
-            "success_rate": round((self.tests_passed / max(self.tests_run, 1)) * 100, 1),
-            "test_results": self.test_results
-        }
+            print("⚠️  Some tests failed. Review the issues above.")
+            return False
 
 def main():
-    """Main test execution"""
-    tester = EnergyBillTester()
-    results = tester.run_all_tests()
+    tester = EnergyOptimizerTester()
+    success = tester.run_comprehensive_test()
     
-    # Return appropriate exit code
-    return 0 if results["passed_tests"] == results["total_tests"] else 1
+    # Save detailed results
+    results = {
+        "timestamp": datetime.now().isoformat(),
+        "total_tests": tester.tests_run,
+        "passed_tests": tester.tests_passed,
+        "success_rate": f"{(tester.tests_passed/tester.tests_run*100):.1f}%" if tester.tests_run > 0 else "0%",
+        "test_details": tester.test_results
+    }
+    
+    with open("/app/test_reports/backend_test_results.json", "w") as f:
+        json.dump(results, f, indent=2)
+    
+    return 0 if success else 1
 
 if __name__ == "__main__":
     sys.exit(main())

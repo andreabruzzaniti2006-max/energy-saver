@@ -1,0 +1,62 @@
+{
+  "timestamp": "2026-04-05T01:08:33.078869",
+  "total_tests": 9,
+  "passed_tests": 8,
+  "success_rate": "88.9%",
+  "test_details": [
+    {
+      "name": "Health Check",
+      "success": true,
+      "details": "Status: 200",
+      "error": ""
+    },
+    {
+      "name": "Dev Bypass Login",
+      "success": true,
+      "details": "Login successful, session created",
+      "error": ""
+    },
+    {
+      "name": "Session Validation",
+      "success": true,
+      "details": "Session valid and authenticated",
+      "error": ""
+    },
+    {
+      "name": "Session Persistence",
+      "success": true,
+      "details": "Session maintained across multiple requests",
+      "error": ""
+    },
+    {
+      "name": "Upload PDF (needs review)",
+      "success": true,
+      "details": "Bill ID: 69d1b6107e5132fe6b0cb7fc, Status: needs_manual_review",
+      "error": ""
+    },
+    {
+      "name": "Analytics Blocked (unreviewed bills)",
+      "success": false,
+      "details": "",
+      "error": "Expected 400 with review message, got 200: {\"status\":\"success\",\"analysis_run\":{\"user_id\":\"69d1ad37830221e017f552fb\",\"org_id\":\"69d1ad37830221e017f552f9\",\"site_id\":\"69d1ad37830221e017f552fa\",\"created_at\":\"2026-04-05T01:08:32.848842+00:00\",\"weath"
+    },
+    {
+      "name": "Complete Bill Review",
+      "success": true,
+      "details": "Status changed to: parsed",
+      "error": ""
+    },
+    {
+      "name": "Analytics Success (after review)",
+      "success": true,
+      "details": "Analysis completed with 0 advices",
+      "error": ""
+    },
+    {
+      "name": "Dashboard Warning (pending reviews)",
+      "success": true,
+      "details": "Found 2 pending bill reviews",
+      "error": ""
+    }
+  ]
+}

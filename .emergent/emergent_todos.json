@@ -1,14 +1,14 @@
 [
   {
-    "content": "Bugfix: riprodurre il caso upload PDF -> analisi bloccata",
+    "content": "Bugfix 2: bloccare analytics su bollette needs_manual_review fino a revisione completata",
     "status": "in_progress"
   },
   {
-    "content": "Bugfix: correggere backend/UX per bollette caricate ma non ancora strutturate",
+    "content": "Bugfix 2: rendere più robusta la persistenza sessione dopo dev login",
     "status": "pending"
   },
   {
-    "content": "Bugfix: testare end-to-end con testing agent dopo la correzione",
+    "content": "Bugfix 2: ritest end-to-end con testing agent",
     "status": "pending"
   }
 ]

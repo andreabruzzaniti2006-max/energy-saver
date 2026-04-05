@@ -84,8 +84,10 @@ const AppRoutes = () => {
       try {
         const { data } = await api.get("/auth/me");
         setSession(data.session);
+        return data.session;
       } catch (error) {
         setSession(null);
+        return null;
       } finally {
         setLoading(false);
       }

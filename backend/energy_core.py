@@ -542,7 +542,7 @@ def store_bill_file(file_bytes: bytes, filename: str) -> Dict[str, Any]:
         "period_end": None,
         "raw_text_preview": "",
     }
-    extraction_status = "parsed" if extracted_fields.get("consumption_kwh") or extracted_fields.get("total_cost_eur") else ("needs_manual_review" if has_pdf_header else "invalid_pdf")
+    extraction_status = "parsed" if extracted_fields.get("consumption_kwh") is not None and extracted_fields.get("total_cost_eur") is not None else ("needs_manual_review" if has_pdf_header else "invalid_pdf")
 
     return {
         "id": file_id,

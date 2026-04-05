@@ -23,9 +23,17 @@ export default function LoginPage({ refreshSession }) {
         name: "Energy Saver Demo",
         company_name: "Energy Saver Demo",
       });
-      await refreshSession();
+      let nextSession = null;
+      for (let attempt = 0; attempt < 5; attempt += 1) {
+        nextSession = await refreshSession();
+        if (nextSession) break;
+        await new Promise((resolve) => setTimeout(resolve, 250));
+      }
+      if (!nextSession) {
+        throw new Error("Sessione non pronta dopo il login");
+      }
       toast.success("Accesso demo completato");
-      navigate("/dashboard");
+      navigate(nextSession.site?.onboarding_completed ? "/dashboard" : "/onboarding");
     } catch (error) {
       toast.error(extractApiError(error, "Accesso demo non riuscito"));
     } finally {
