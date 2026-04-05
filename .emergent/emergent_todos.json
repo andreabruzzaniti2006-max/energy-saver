@@ -1,22 +1,14 @@
 [
   {
-    "content": "Phase 2: Preparare design system e architettura V1 working app",
-    "status": "completed"
-  },
-  {
-    "content": "Phase 2: Implementare backend SaaS V1 completo",
-    "status": "completed"
-  },
-  {
     "content": "Phase 2: Implementare frontend V1 completo",
-    "status": "in_progress"
+    "status": "completed"
   },
   {
     "content": "Phase 2: Coprire tutte le user stories in sviluppo e testing",
-    "status": "pending"
+    "status": "in_progress"
   },
   {
     "content": "Phase 2: End to End Testing using Testing Agent",
-    "status": "pending"
+    "status": "in_progress"
   }
 ]

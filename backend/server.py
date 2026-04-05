@@ -647,7 +647,7 @@ async def dev_login(payload: DevLoginRequest, response: Response):
 async def google_auth_start(next_path: str = "/dashboard"):
     if not os.getenv("GOOGLE_CLIENT_ID") or not os.getenv("GOOGLE_CLIENT_SECRET"):
         raise HTTPException(status_code=503, detail="Google OAuth non configurato")
-    return RedirectResponse(get_google_auth_url(next_path))
+    return RedirectResponse(get_google_auth_url(next_path), status_code=302)
 
 
 @api_router.get("/auth/google/callback")
@@ -670,7 +670,7 @@ async def google_auth_callback(request: Request, response: Response, code: Optio
     session_token = create_session_token(str(user["_id"]), str(org["_id"]), str(site["_id"]), user_info.get("email", ""))
     state_payload = decode_google_state(state or "")
     redirect_path = state_payload.get("next_path", "/dashboard")
-    redirect_response = RedirectResponse(f"{base_frontend}/auth/callback?status=success&next={redirect_path}")
+    redirect_response = RedirectResponse(f"{base_frontend}/auth/callback?status=success&next={redirect_path}", status_code=302)
     set_auth_cookie(redirect_response, session_token)
     return redirect_response
 
