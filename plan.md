@@ -3,152 +3,196 @@
 ## 1) Objectives
 - Deliver a sellable V1 SaaS for PMI (single site) that demonstrates **real economic impact** via: waste detection, smart advice w/ ROI, and cost prediction.
 - Use current stack **React + FastAPI + MongoDB** while keeping SaaS-ready modularity (tenant/user isolation, roles, auditability).
-- V1 requires real integrations: **Google OAuth**, **OpenWeather**, **energy price signal**, **email notifications**.
-- **Decision:** Phase 1 WILL be a POC isolation phase (core workflow includes multiple external integrations + file/PDF ingestion + analytics → high failure risk). Do not proceed to full app until POC passes success criteria.
+- V1 requires real integrations: **Google OAuth**, **OpenWeather**, **energy price signal**, and **email notification flow** (development-mode is acceptable initially).
+- **Approach:** De-risk analytics + integrations first via a POC, then build the full working app.
 
 ---
 
 ## 2) Implementation Steps
 
-### Phase 1 — Core Workflow POC (Isolation) 
+### Phase 1 — Core Workflow POC (Isolation) ✅ COMPLETED
 **Goal:** Prove end-to-end core logic works with real inputs and integrations, via scripts + minimal API.
 
-**Scope (POC):**
-- Ingest energy data from: (1) manual entry (CSV-like payload) and (2) **PDF-ready upload flow** (store file + stub extraction OR basic extraction if feasible).
-- Fetch **weather** (OpenWeather) and **price signal** (choose a source; if no official API, use a stable public endpoint + caching + fallback manual tariff table).
-- Run:
-  - anomaly detection (simple seasonal baseline + z-score / rolling stats)
-  - smart advice (rule-based patterns + estimated savings)
-  - ROI estimation (savings − cost; payback)
-  - cost prediction (baseline regression vs degree-days + price)
-- Validate integration strategy: secrets, rate limits, retries, caching, and data contracts.
-- Websearch task (during POC): confirm best practice for (a) OpenWeather usage/caching, (b) Italy/EU price signal sources, (c) PDF extraction approach (pdfplumber/tabula/textract) and accuracy tradeoffs.
+**Status notes (what’s done):**
+- Implemented and validated POC core pipeline:
+  - Manual energy data ingestion
+  - PDF-ready bill upload flow with secure local storage + best-effort parsing (and conceptual “needs manual review” fallback)
+  - Weather enrichment
+  - Energy price signal enrichment
+  - Anomaly detection
+  - Smart advice generation including ROI/payback
+  - KPI generation
+  - Cost prediction + alert flag
+- Implemented backend POC files:
+  - `/app/backend/server.py`
+  - `/app/backend/energy_core.py`
+  - `/app/scripts/poc_core_flow.py`
+- Real integrations validated:
+  - OpenWeather integration working end-to-end in POC
+  - Energy prices integration working via `https://api.energy-charts.info/price?bzn=IT-North` (EUR/MWh converted to EUR/kWh)
+- Testing validated:
+  - Testing agent report: `/app/test_reports/iteration_1.json` shows **100% backend pass** for Phase 1 endpoints.
 
-**User stories (POC):**
-1. As a user, I can upload a bill PDF and see it stored with metadata so I can start analysis immediately.
-2. As a user, I can paste/submit manual monthly consumption and cost data to bootstrap insights.
-3. As a user, I can run an “Analyze now” job and get anomalies detected on my sample dataset.
-4. As a user, I can see 3–5 actionable advices with savings €/month and ROI so I can decide what to do.
-5. As a user, I can see next-month cost prediction and an alert when forecasted cost rises above threshold.
+**Deliverables shipped (Phase 1):**
+- Script: `/app/scripts/poc_core_flow.py` produces a JSON report proving the end-to-end flow.
+- POC endpoints available under `/api/poc/*`:
+  - `GET /api/poc/contracts`
+  - `POST /api/poc/ingest-manual`
+  - `POST /api/poc/upload-bill`
+  - `POST /api/poc/run-analysis`
+  - `GET /api/poc/latest-analysis`
 
-**Testing (POC):**
-- Contract tests for external APIs (happy path + rate limit + missing fields).
-- Golden dataset tests: given a small fixed timeseries → anomalies + advice output stable.
-- PDF pipeline test: upload → stored → parsed fields OR “needs manual mapping” state.
-- Determinism: analytics functions pure + unit tested.
-
-**Deliverables:**
-- `/scripts/poc_core_flow.py` that runs: ingest sample → fetch signals → analytics → prints JSON report.
-- Minimal FastAPI endpoints: `/poc/upload-bill`, `/poc/ingest-manual`, `/poc/run-analysis`.
-- Documented data contracts (JSON schemas) for consumption, weather, prices, analytics outputs.
-
-**Exit criteria:**
-- One real OpenWeather call succeeds and is cached.
-- One real price signal call succeeds OR documented fallback works.
-- POC generates consistent anomalies + advice + ROI + prediction on sample data.
+**Exit criteria:** Met.
 
 ---
 
-### Phase 2 — V1 App Development (MVP, no billing, delay auth until Phase 3)
-**Goal:** Build the product around the proven core. Keep multi-site scalable but UI targets single site.
+### Phase 2 — V1 Working App (Full Frontend + Core SaaS Backend + Required Integrations)
+**Goal:** Turn the validated POC into a usable V1 product: full SaaS UX for PMI single-site, with required integrations (Google OAuth, weather/prices enrichment, notifications incl. dev-mode email), and a backend structure scalable to multi-site later.
 
-**App structure guidance (monorepo):**
-- `/frontend` React + Tailwind: pages (Dashboard, Bills, Insights, Reports, Settings)
-- `/backend` FastAPI: routers (auth placeholder, org/site, bills, consumption, analytics, notifications, integrations)
-- `/shared` JSON schemas (Pydantic models mirrored as TS types via codegen or manual)
+#### 2.1 Scope (what we build in V1)
+**Frontend (React + Tailwind)**
+- **Authentication**
+  - Google OAuth login
+  - Simple **dev/test bypass** for agent/browser testing (feature-flagged; disabled in production)
+- **Onboarding flow (PMI-first, single-site)**
+  1) Create org + site (single)
+  2) Set site location (address → lat/lon) and business hours
+  3) Add first data: upload PDF or manual entry
+- **Core pages**
+  - Dashboard: KPIs + trends + “Top actions” advice list + alerts
+  - Bills: upload, list, details, extraction status (“parsed / needs review”)
+  - Consumption: manual entry UI (hourly/daily/monthly import), data table, simple CSV import
+  - Insights: anomalies timeline + advice detail view w/ ROI/payback + filtering
+  - Reports: generate/download monthly PDF report
+  - Pricing: Free/Pro plans UI (feature gating only, no billing)
+  - Settings: site settings, alert preferences, integration status
 
-**Backend scope:**
-- Entities in Mongo (collections):
-  - `users`, `orgs`, `sites`(single in V1), `bills`, `consumption_readings`(daily/monthly), `analytics_runs`, `advices`, `alerts`, `integrations_state`
-- Job execution: synchronous for MVP; keep interface ready for async worker later.
-- APIs:
-  - Bills: upload, list, view, extraction status
-  - Consumption: manual create/edit, import CSV, list
-  - Analytics: run, get latest KPIs, list advices, list anomalies
-  - Notifications: create alert rules, list events
+**Backend (FastAPI + MongoDB)**
+- Transition from POC collections to SaaS-friendly entities:
+  - `users`, `orgs`, `sites` (single-site in V1 but model supports multi-site),
+  - `bills`, `consumption_readings`, `analytics_runs`, `advices`, `alerts`, `notification_preferences`
+- Core APIs (V1):
+  - Auth: Google OAuth + dev bypass
+  - Org/Site: create/read/update
+  - Bills: upload/list/detail; extraction status and extracted fields
+  - Consumption: create/list/import
+  - Analytics: run analysis, get latest KPIs, list anomalies, list advices
+  - Reports: generate + download PDF
+  - Notifications:
+    - in-app notifications (dashboard)
+    - development-mode email notifications (log / internal emergent dev email mechanism)
+- Integrations (V1):
+  - Weather: OpenWeather (cached)
+  - Prices: energy-charts (cached) + graceful fallback if unavailable
 
-**Frontend scope (UX):**
-- Onboarding wizard (3 steps): create org/site → add tariff basics → add first data (manual or PDF upload).
-- Dashboard: KPI cards + charts + “Top 5 actions” advice list.
-- Bills page: upload + table + “needs review” extraction.
-- Insights page: anomalies timeline + filters; advice detail view with ROI.
-- Pricing page (Free/Pro) with feature gating UI only.
+**Data & Analytics**
+- Move `energy_core` logic into a service module (keep it deterministic + unit tested)
+- Add persistence of:
+  - analysis inputs/outputs
+  - advice history
+  - alert events and notification attempts
+- Ensure all computations are tenant-scoped (org/site).
 
-**User stories (V1):**
-1. As a user, I can complete onboarding and see a demo dashboard even before full data is available.
-2. As a user, I can upload bills and track their extraction/review status.
-3. As a user, I can enter consumption/cost data and immediately refresh KPIs.
-4. As a user, I can receive in-app alerts for anomalies and forecasted bill increases.
-5. As a user, I can export a monthly PDF report to share with my accountant/manager.
+#### 2.2 User stories (Phase 2)
+**Auth & onboarding**
+1. As a user, I can sign in with Google and be redirected to my dashboard.
+2. As a user (or tester), I can use a dev bypass login in non-production environments to access the app quickly.
+3. As a user, I can complete onboarding (site location + hours + first data input) and reach a usable dashboard.
 
-**Testing (V1):**
-- E2E: onboarding → add data → run analysis → see dashboard → export report.
-- API integration tests for file upload + analytics run.
-- Frontend component tests for charts/cards and empty/error states.
+**Data ingestion**
+4. As a user, I can upload a bill PDF and see it stored with extraction status and extracted fields.
+5. As a user, if PDF extraction is incomplete, I can manually correct key fields (consumption, total cost, billing period).
+6. As a user, I can enter consumption readings manually (hourly/daily/monthly) and edit them later.
 
-**Exit criteria:**
-- End-to-end workflow works without auth: onboarding → ingest → analyze → advice/prediction visible.
-- Report PDF generated and downloadable.
+**Analytics & value delivery**
+7. As a user, I can run analysis and immediately see updated KPIs, anomalies, and prioritized savings actions.
+8. As a user, I can open an advice detail view and see estimated monthly savings, investment, payback, and ROI.
+9. As a user, I can see a 30-day cost forecast and an alert when expected cost increases above a threshold.
+
+**Notifications & reporting**
+10. As a user, I can see in-app alerts on the dashboard for anomalies and forecast warnings.
+11. As a user, I can enable “email alerts” (dev-mode) and verify alerts are sent/logged.
+12. As a user, I can generate and download a monthly PDF report summarizing KPIs, anomalies, and actions.
+
+**Productization**
+13. As a user, I can view Free/Pro plans and understand feature differences (no payment required in V1).
+
+#### 2.3 Testing requirements (Phase 2)
+**Backend**
+- Integration tests:
+  - Google OAuth callback flow (staging) + dev-bypass flow (local/preview)
+  - Bills upload (valid/invalid, file size limit) + extraction status transitions
+  - Consumption CRUD + CSV import
+  - Analytics run persists correct entities (analysis_runs, advices, alerts)
+  - External integrations contract tests:
+    - OpenWeather: success + invalid key + rate limit handling
+    - energy-charts: success + timeout/failure fallback
+- Security tests:
+  - Tenant scoping enforced on all queries (org/site)
+  - File upload validation (MIME, size)
+
+**Frontend**
+- E2E tests (Playwright/Cypress style flows):
+  - login (dev bypass) → onboarding → upload bill/manual entry → run analysis → see dashboard
+  - advice details view shows ROI/payback
+  - report generation downloads PDF
+- UI tests:
+  - empty states (no data) + error states (integration offline)
+
+**Definition of Done (Phase 2)**
+- A new user can: login → onboard → add data (manual or PDF) → run analysis → see KPIs/anomalies/advices → export report.
+- Integrations are live and resilient (cached + fallback).
+- Notifications are visible in-app; email path works in dev-mode.
 
 ---
 
-### Phase 3 — Integrations + Auth + Notifications (Production readiness)
-**Goal:** Add real-world access control + required integrations (Google login, email) and harden.
+### Phase 3 — Multi-site + Team Features + Hardening (Post-V1)
+**Goal:** Expand from single-site PMI to multi-site orgs and more operational maturity.
 
 **Scope:**
-- Google OAuth (Authorization Code flow) + JWT session tokens.
-- Tenant isolation: org_id enforced on every query.
-- Email notifications: SendGrid/Mailgun/SMTP; templates for anomalies/forecast/advice.
-- Background scheduling (simple cron): daily fetch weather/prices; nightly analysis run.
+- Multi-site per org + aggregation views
+- Roles/permissions + teammate invites
+- Scheduled jobs (nightly analysis, daily signals refresh)
+- Observability (structured logging, error tracking), data retention policies
+- Improved PDF extraction pipeline and field mapping UI
 
 **User stories (Phase 3):**
-1. As a user, I can sign in with Google and return to my organization dashboard.
-2. As an admin, I can invite a teammate and control access to insights and reports.
-3. As a user, I can enable email alerts and choose threshold preferences.
-4. As a user, I can see an audit trail of analysis runs and alerts sent.
-5. As a user, I can recover access securely (logout everywhere / token expiry).
+1. As an org admin, I can add multiple sites and view aggregated KPIs.
+2. As an org admin, I can invite teammates and assign roles.
+3. As a user, I can see site comparisons and rank waste and savings potential.
 
-**Testing (Phase 3):**
-- OAuth E2E in staging (redirect URIs, state/nonce, token refresh).
-- Email sandbox tests + deliverability checks.
-- Security tests: auth-required routes, org isolation, file upload validation.
-
-**Exit criteria:**
-- Google login works in staging + production.
-- Emails sent reliably with retries and suppression of duplicates.
+**Testing:**
+- Multi-tenant + multi-site regression
+- Load tests on dashboard + analytics endpoints
 
 ---
 
-### Phase 4 — Scale features (multi-site, pricing gates, advanced analytics)
+### Phase 4 — Advanced Optimization + Billing + Enterprise Readiness
 **Scope:**
-- Multi-site per org (UI + aggregation) while keeping PMI-first UX.
-- Feature gating for Free/Pro (still no payments) + usage limits.
-- Improved models: better baselines, weather normalization, more robust anomaly detection.
-- Admin console + observability (logs/metrics), data retention policies.
-
-**User stories (Phase 4):**
-1. As a user, I can add a second site and view an aggregated org dashboard.
-2. As a user, I can compare sites and identify which has the highest waste.
-3. As a Pro user, I can access advanced predictions and full reports.
-4. As an admin, I can monitor system health and failed integrations.
-5. As a user, I can download historical reports and benchmarks.
-
-**Testing (Phase 4):**
-- Multi-tenant + multi-site regression tests.
-- Load test core endpoints (dashboard, analytics run).
+- Feature gating enforcement (Free/Pro) + real billing (Stripe)
+- Advanced ML models (weather-normalized demand modeling, robust anomaly detection)
+- Public sector/enterprise readiness (audit logs, compliance posture)
+- Hardware/smart-meter ingestion connectors
 
 ---
 
 ## 3) Next Actions
-1. Collect required credentials/secrets: OpenWeather key, price API source/key (or confirm fallback), Google OAuth client + redirect URIs, email provider SMTP/API key.
-2. Approve POC approach for PDF: store + parse best-effort + manual review fallback.
-3. Implement Phase 1 scripts + minimal FastAPI endpoints; run with real sample bills/inputs.
-4. Freeze schemas for: consumption input, analytics output, advice model.
+1. **Lock V1 information architecture + UX flows** (onboarding, dashboard, bills, insights, reports, pricing).
+2. Refactor POC modules into production-ready services (keep POC endpoints for regression/demo).
+3. Implement Google OAuth + dev/test bypass.
+4. Implement core SaaS data model + tenant scoping (org/site), single-site UI default.
+5. Build UI pages + wire up APIs end-to-end.
+6. Add dev-mode email notifications + in-app notifications.
+7. Add report generation (PDF) + download.
+8. Execute Phase 2 E2E tests in preview environment.
 
 ---
 
 ## 4) Success Criteria
-- POC proves: manual + PDF-ready ingestion → weather/price enrichment → anomaly + advice/ROI + prediction outputs are correct enough to demo.
-- V1 delivers: onboarding + dashboard + insights + bill management + PDF report with stable UX.
-- Integrations deliver: Google login + email alerts working in staging/prod.
-- System is SaaS-ready: org isolation, modular services, deployable with documented steps.
+- **Phase 1:** Completed: core workflow validated with real signals and POC endpoints.
+- **Phase 2 (V1):**
+  - Usable web app: login → onboarding → data ingestion → analytics → advices/ROI → prediction → report.
+  - Google OAuth works; dev/test bypass available only in non-production.
+  - Weather and energy price signals integrated with caching/fallback.
+  - Notifications working (in-app + dev-mode email).
+  - Architecture remains SaaS-ready and scalable to multi-site in later phases.
